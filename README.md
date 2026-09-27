@@ -4,7 +4,7 @@
 
 This service is the **sole** human IdP for the foundation (`login.prims.sh`): OIDC/OAuth so people sign into [drive.prims.sh](https://drive.prims.sh), Prims Browsers, and other Prims surfaces with one **Prims account**.
 
-**Glossary:** [GLOSSARY.md](./GLOSSARY.md) · **Account model (locked):** [#1](https://github.com/primfoundation/prims-sso/issues/1)
+**Glossary:** [GLOSSARY.md](./GLOSSARY.md) · **Architecture (canonical):** [#6](https://github.com/primfoundation/prims-sso/issues/6) (supersedes #1)
 
 ## What this is
 
@@ -31,7 +31,7 @@ Prefer Cloudflare Access + this IdP (or equivalent OIDC) for HTML gates.
 
 ## Workstreams
 
-1. [#1 Prims account model — locked spec](https://github.com/primfoundation/prims-sso/issues/1)
+1. [#6 Architecture: passkeys + unlimited agent keypairs](https://github.com/primfoundation/prims-sso/issues/6) (canonical; #1 superseded)
 2. [#2 OIDC/OAuth provider endpoint](https://github.com/primfoundation/prims-sso/issues/2)
 3. [#3 drive.prims.sh integration (Cloudflare Access + IdP)](https://github.com/primfoundation/prims-sso/issues/3)
 4. [#4 Agent vs human identity separation](https://github.com/primfoundation/prims-sso/issues/4)
