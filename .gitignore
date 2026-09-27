@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Wrangler / local secrets — never commit
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.wrangler/
+dist/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Test / coverage
+coverage/
+*.log
+
+# Temporary claim / deploy notes that may embed tokens
+claim-preview.url
+*.secrets.json

@@ -1,0 +1,7 @@
+# Local Wrangler secrets (gitignored). Copy to .dev.vars and fill values.
+# Never commit real values. Production: `wrangler secret put STYTCH_PROJECT_ID` etc.
+
+STYTCH_PROJECT_ID=project-test-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+STYTCH_SECRET=secret-test-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# Optional override; otherwise inferred from project-test- / project-live- prefix
+# STYTCH_ENV=test

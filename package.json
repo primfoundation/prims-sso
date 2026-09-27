@@ -1,0 +1,22 @@
+{
+  "name": "prims-sso",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prims SSO — Stytch-backed passkey IdP façade on Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:preview": "wrangler deploy --temporary",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"Slice 0: no token tests yet (Slice 2+)\""
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260925.1",
+    "typescript": "^5.9.2",
+    "wrangler": "^4.141.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

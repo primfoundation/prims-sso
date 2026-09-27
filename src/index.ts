@@ -1,0 +1,333 @@
+/**
+ * prims-sso Slice 0 — thin Workers façade over Stytch passkeys.
+ * RP ID locked to prims.sh (#6). No WebAuthn crypto here.
+ */
+
+import { renderPage } from "./html";
+import {
+  clearSessionCookieHeader,
+  DEFAULT_SESSION_COOKIE,
+  parseCookies,
+  sessionCookieHeader,
+} from "./session";
+import { StytchApiError, stytchFromEnv, type StytchClient } from "./stytch";
+
+export interface Env {
+  ASSETS: Fetcher;
+  RP_ID: string;
+  SESSION_COOKIE: string;
+  SESSION_DURATION_MINUTES: string;
+  STYTCH_PROJECT_ID?: string;
+  STYTCH_SECRET?: string;
+  STYTCH_ENV?: string;
+}
+
+function json(data: unknown, status = 200, headers?: HeadersInit): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...headers,
+    },
+  });
+}
+
+function html(body: string, status = 200, headers?: HeadersInit): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      ...headers,
+    },
+  });
+}
+
+function getClient(env: Env): StytchClient {
+  return stytchFromEnv(env);
+}
+
+function rpId(env: Env): string {
+  return env.RP_ID || "prims.sh";
+}
+
+function cookieName(env: Env): string {
+  return env.SESSION_COOKIE || DEFAULT_SESSION_COOKIE;
+}
+
+function sessionMinutes(env: Env): number {
+  const n = Number(env.SESSION_DURATION_MINUTES || "60");
+  return Number.isFinite(n) && n >= 5 ? n : 60;
+}
+
+async function readJson<T>(request: Request): Promise<T> {
+  return (await request.json()) as T;
+}
+
+async function resolveUserIdByEmail(
+  stytch: StytchClient,
+  email: string,
+): Promise<string | null> {
+  try {
+    const found = await stytch.searchUsersByEmail(email);
+    const hit = found.results?.[0];
+    return hit?.user_id ?? null;
+  } catch (err) {
+    if (err instanceof StytchApiError && err.status === 404) return null;
+    // search may 400 on empty — treat as miss only for known not-found shapes
+    if (err instanceof StytchApiError && err.body.error_type === "user_not_found") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function ensureUser(
+  stytch: StytchClient,
+  email: string,
+): Promise<string> {
+  const existing = await resolveUserIdByEmail(stytch, email);
+  if (existing) return existing;
+  const created = await stytch.createUser(email);
+  return created.user_id;
+}
+
+function mapStytchError(err: unknown): Response {
+  if (err instanceof StytchApiError) {
+    return json(
+      {
+        error: err.body.error_message ?? err.message,
+        error_type: err.body.error_type,
+        request_id: err.body.request_id,
+      },
+      err.status >= 400 && err.status < 600 ? err.status : 502,
+    );
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  const status = /Missing STYTCH_/.test(message) ? 503 : 500;
+  return json({ error: message }, status);
+}
+
+async function handleRegisterStart(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ email?: string }>(request);
+  const email = body.email?.trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return json({ error: "Valid email is required" }, 400);
+  }
+  const stytch = getClient(env);
+  const user_id = await ensureUser(stytch, email);
+  const start = await stytch.webauthnRegisterStart({
+    user_id,
+    domain: rpId(env),
+  });
+  return json({
+    user_id: start.user_id,
+    public_key_credential_creation_options:
+      start.public_key_credential_creation_options,
+  });
+}
+
+async function handleRegisterFinish(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  const body = await readJson<{
+    user_id?: string;
+    public_key_credential?: string;
+  }>(request);
+  if (!body.user_id || !body.public_key_credential) {
+    return json({ error: "user_id and public_key_credential required" }, 400);
+  }
+  const stytch = getClient(env);
+  const minutes = sessionMinutes(env);
+  const result = await stytch.webauthnRegister({
+    user_id: body.user_id,
+    public_key_credential: body.public_key_credential,
+    session_duration_minutes: minutes,
+  });
+  const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
+  if (result.session_token) {
+    headers.append(
+      "Set-Cookie",
+      sessionCookieHeader(cookieName(env), result.session_token, minutes * 60),
+    );
+  }
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      user_id: result.user_id,
+      has_session: Boolean(result.session_token),
+    }),
+    { status: 200, headers },
+  );
+}
+
+async function handleLoginStart(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ email?: string }>(request);
+  const email = body.email?.trim().toLowerCase();
+  const stytch = getClient(env);
+  let user_id: string | undefined;
+  if (email) {
+    const found = await resolveUserIdByEmail(stytch, email);
+    if (!found) {
+      return json({ error: "No account for that email. Register a passkey first." }, 404);
+    }
+    user_id = found;
+  }
+  const start = await stytch.webauthnAuthenticateStart({
+    domain: rpId(env),
+    user_id,
+  });
+  return json({
+    user_id: start.user_id,
+    public_key_credential_request_options:
+      start.public_key_credential_request_options,
+  });
+}
+
+async function handleLoginFinish(request: Request, env: Env): Promise<Response> {
+  const body = await readJson<{ public_key_credential?: string }>(request);
+  if (!body.public_key_credential) {
+    return json({ error: "public_key_credential required" }, 400);
+  }
+  const stytch = getClient(env);
+  const minutes = sessionMinutes(env);
+  const result = await stytch.webauthnAuthenticate({
+    public_key_credential: body.public_key_credential,
+    session_duration_minutes: minutes,
+  });
+  const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
+  if (result.session_token) {
+    headers.append(
+      "Set-Cookie",
+      sessionCookieHeader(cookieName(env), result.session_token, minutes * 60),
+    );
+  }
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      user_id: result.user_id,
+      has_session: Boolean(result.session_token),
+      // Opaque presence only — never echo session_token / jwt to JSON body.
+    }),
+    { status: 200, headers },
+  );
+}
+
+async function handleSessionPage(request: Request, env: Env): Promise<Response> {
+  const cookies = parseCookies(request.headers.get("Cookie"));
+  const token = cookies[cookieName(env)];
+  if (!token) {
+    return Response.redirect(new URL("/", request.url).toString(), 302);
+  }
+  try {
+    const stytch = getClient(env);
+    const auth = await stytch.sessionsAuthenticate(token);
+    return html(
+      renderPage({
+        mode: "signed-in",
+        rpId: rpId(env),
+        userId: auth.user_id,
+      }),
+    );
+  } catch {
+    const headers = new Headers();
+    headers.append("Set-Cookie", clearSessionCookieHeader(cookieName(env)));
+    headers.set("Location", "/");
+    return new Response(null, { status: 302, headers });
+  }
+}
+
+async function handleLogout(request: Request, env: Env): Promise<Response> {
+  const cookies = parseCookies(request.headers.get("Cookie"));
+  const token = cookies[cookieName(env)];
+  if (token) {
+    try {
+      const stytch = getClient(env);
+      await stytch.sessionsRevoke(token);
+    } catch {
+      // Best-effort revoke; always clear local cookie.
+    }
+  }
+  const headers = new Headers();
+  headers.append("Set-Cookie", clearSessionCookieHeader(cookieName(env)));
+  headers.set("Location", "/");
+  return new Response(null, { status: 302, headers });
+}
+
+async function handleHealth(env: Env): Promise<Response> {
+  const configured = Boolean(
+    env.STYTCH_PROJECT_ID?.trim() && env.STYTCH_SECRET?.trim(),
+  );
+  let stytch_env: string | null = null;
+  if (configured) {
+    try {
+      stytch_env = getClient(env).envName;
+    } catch {
+      stytch_env = null;
+    }
+  }
+  return json({
+    ok: true,
+    service: "prims-sso",
+    slice: 0,
+    rp_id: rpId(env),
+    stytch_configured: configured,
+    stytch_env,
+    secrets_expected: ["STYTCH_PROJECT_ID", "STYTCH_SECRET"],
+  });
+}
+
+export default {
+  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+    const method = request.method.toUpperCase();
+
+    try {
+      if (method === "GET" && path === "/health") {
+        return handleHealth(env);
+      }
+
+      if (method === "GET" && (path === "/" || path === "/login")) {
+        return html(renderPage({ mode: "login", rpId: rpId(env) }));
+      }
+
+      if (method === "GET" && path === "/register") {
+        return html(renderPage({ mode: "register", rpId: rpId(env) }));
+      }
+
+      if (method === "GET" && path === "/session") {
+        return handleSessionPage(request, env);
+      }
+
+      if (method === "POST" && path === "/api/passkey/register/start") {
+        return await handleRegisterStart(request, env);
+      }
+      if (method === "POST" && path === "/api/passkey/register/finish") {
+        return await handleRegisterFinish(request, env);
+      }
+      if (method === "POST" && path === "/api/passkey/login/start") {
+        return await handleLoginStart(request, env);
+      }
+      if (method === "POST" && path === "/api/passkey/login/finish") {
+        return await handleLoginFinish(request, env);
+      }
+      if (
+        (method === "POST" || method === "GET") &&
+        path === "/api/logout"
+      ) {
+        return handleLogout(request, env);
+      }
+
+      // Static brand assets via Workers assets binding
+      if (env.ASSETS) {
+        const asset = await env.ASSETS.fetch(request);
+        if (asset.status !== 404) return asset;
+      }
+
+      return json({ error: "not found" }, 404);
+    } catch (err) {
+      return mapStytchError(err);
+    }
+  },
+};

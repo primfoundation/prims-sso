@@ -1,0 +1,24 @@
+name = "prims-sso"
+account_id = "3c1d42c77978e6af0e458b6f1130c01b"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Static brand assets (kit.css, folio, favicon, fonts)
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+# Non-secret config. Stytch credentials are Workers secrets only:
+#   STYTCH_PROJECT_ID, STYTCH_SECRET
+# Optional: STYTCH_ENV = "test" | "live" (default inferred from project id prefix)
+[vars]
+RP_ID = "prims.sh"
+SESSION_COOKIE = "prims_session"
+SESSION_DURATION_MINUTES = "60"
+
+# Production route (attach when deploying with zone credentials):
+# routes = [{ pattern = "login.prims.sh/*", zone_name = "prims.sh" }]
+# Or custom domain: login.prims.sh → this Worker
+
