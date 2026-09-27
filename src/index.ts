@@ -1,5 +1,6 @@
 /**
- * prims-sso — Stytch passkey façade (Slice 0) + Prims accounts on D1 (Slice 1).
+ * prims-sso — Stytch passkey façade (Slice 0), Prims accounts (Slice 1),
+ * and agent sub-identity tokens (Slice 2).
  * RP ID locked to prims.sh (#6). No WebAuthn crypto here.
  */
 
@@ -8,6 +9,7 @@ import {
   handleAccountGet,
   handleAccountPatch,
 } from "./accounts_api";
+import { dispatchAgentRoutes } from "./agents_api";
 import { AccountStore } from "./accounts";
 import { renderPage } from "./html";
 import {
@@ -314,7 +316,7 @@ async function handleHealth(env: Env): Promise<Response> {
   return json({
     ok: true,
     service: "prims-sso",
-    slice: 1,
+    slice: 2,
     rp_id: rpId(env),
     stytch_configured: configured,
     stytch_env,
@@ -387,6 +389,9 @@ export default {
           return await handleAccountPatch(request, env, account_id);
         }
       }
+
+      const agentResponse = await dispatchAgentRoutes(request, env, path, method);
+      if (agentResponse) return agentResponse;
 
       if (env.ASSETS) {
         const asset = await env.ASSETS.fetch(request);

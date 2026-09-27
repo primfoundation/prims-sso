@@ -72,7 +72,7 @@ npx wrangler deploy
 | Concern | Owner |
 |---------|--------|
 | **Human identity** (Prims account, web session on `login.prims.sh`) | **This repo** (`prims-sso`) + Stytch |
-| **Agent tokens** (short-lived, scoped under a human account) | **Issued by prims-sso** (Slice 2+); **held by Cloudflare** for `drive.prims.sh` per [primsdrive-cloud](https://github.com/primfoundation/primsdrive-cloud); mini never sees raw secrets |
+| **Agent tokens** (short-lived, scoped under a human account) | **Issued by prims-sso** (Slice 2 Agent API); **held by Cloudflare** for `drive.prims.sh` per [primsdrive-cloud](https://github.com/primfoundation/primsdrive-cloud); mini never sees raw secrets |
 
 Human SSO sessions never authorize `/v1` or `/mcp`. Agent bearers never authorize the HTML app.
 
@@ -131,3 +131,60 @@ curl -sS -X PATCH https://login.prims.sh/v1/accounts/$ACCOUNT_ID \
 ```
 
 Schema: `migrations/0001_accounts.sql` (`account_id`, `email`, `stytch_user_id`, `linked_apple`, `role` default `member`, timestamps).
+
+## Agent API (Slice 2)
+
+Sub-identities under a Prims account, plus short-lived opaque tokens. `GET /health` reports `"slice": 2` (and still reports `d1_bound` / `stytch_configured`).
+
+| Item | Value |
+|------|--------|
+| Schema | `migrations/0002_agents.sql` — `agents` (`agent_id`, `account_id`, `display_name`, timestamps) and `agent_tokens` (`token_id`, `token_hash`, `agent_id`, `account_id`, `expires_at`, `revoked_at`, `created_at`) |
+| Token TTL | Default **3600 seconds** (1 hour). Minimum **1**. Maximum **3600** (≤ 1h). |
+| Storage | SHA-256 hex in `token_hash`. The raw token is returned **once** at issue and is not stored. |
+| Revoke | Sets `revoked_at` (denylist). The next introspect fails immediately (no cache; ≤ 5s SLA). |
+| Session auth | Create, issue, and revoke use the same passkey session as the Account API: cookie `prims_session` or `Authorization: Bearer <stytch_session_token>`. The caller must own the account. |
+| Introspect auth | The agent token itself is the credential (`{"token":"..."}`). A human session is not required. |
+
+Create the Prims account (`POST /v1/accounts`) before creating agents. Revoking one token does not revoke a sibling agent's token.
+
+```bash
+# Create agent — response includes agent_id, display_name, account_id
+curl -sS -X POST "https://login.prims.sh/v1/accounts/$ACCOUNT_ID/agents" \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d '{"display_name":"Drive reader"}'
+
+# Issue token (omit ttl_seconds to use the 3600s default)
+curl -sS -X POST "https://login.prims.sh/v1/agents/$AGENT_ID/tokens" \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d '{"ttl_seconds":3600}'
+
+# Introspect — 200 {"active":true,"agent_id":"..."} or 401 {"active":false}
+curl -sS -X POST https://login.prims.sh/v1/agent-tokens/introspect \
+  -H 'content-type: application/json' \
+  -d "{\"token\":\"$AGENT_TOKEN\"}"
+
+# Revoke by token_id (or pass {"token":"<raw token>"} instead)
+curl -sS -X POST https://login.prims.sh/v1/agent-tokens/revoke \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d "{\"token_id\":\"$TOKEN_ID\"}"
+```
+
+Issue response fields: `token` (once), `token_id`, `agent_id`, `account_id`, `expires_at`, `ttl_seconds`.
+
+### Tests
+
+```bash
+npm test
+```
+
+`npm test` runs the Slice 1 account schema check and the Slice 2 token suite (in-memory SQLite, no Wrangler): issue → introspect active → revoke → introspect inactive, plus a sibling agent token that stays valid after the other revoke (A2.5).
+
+Apply the new migration on the existing D1 database (`prims-sso-accounts`) before deploying the Worker:
+
+```bash
+npx wrangler d1 migrations apply prims-sso-accounts --remote
+```
+
