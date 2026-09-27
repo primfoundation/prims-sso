@@ -36,3 +36,7 @@ Prefer Cloudflare Access + this IdP (or equivalent OIDC) for the HTML gate.
 ## Status
 
 **Plan / issues only.** No application code yet.
+
+## Brand assets
+
+Login-surface brand (folio, favicon, Instrument Sans, kit.css) lives in [`brand/`](./brand/) — folded from archived `logins-prims-sh`. Asset consolidation only; no SSO app code yet.
