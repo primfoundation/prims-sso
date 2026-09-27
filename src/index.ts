@@ -16,7 +16,6 @@ import {
   parseCookies,
   sessionCookieHeader,
 } from "./session";
-import { handleSlice1Prove } from "./slice1_prove";
 import { StytchApiError, stytchFromEnv, type StytchClient } from "./stytch";
 
 export interface Env {
@@ -179,10 +178,11 @@ async function handleRegisterFinish(
   const headers = new Headers({
     "Content-Type": "application/json; charset=utf-8",
   });
-  if (result.session_token) {
+  const sessionToken = result.session_token || result.session_jwt;
+  if (sessionToken) {
     headers.append(
       "Set-Cookie",
-      sessionCookieHeader(cookieName(env), result.session_token, minutes * 60),
+      sessionCookieHeader(cookieName(env), sessionToken, minutes * 60),
     );
   }
   return new Response(
@@ -239,10 +239,11 @@ async function handleLoginFinish(
   const headers = new Headers({
     "Content-Type": "application/json; charset=utf-8",
   });
-  if (result.session_token) {
+  const sessionToken = result.session_token || result.session_jwt;
+  if (sessionToken) {
     headers.append(
       "Set-Cookie",
-      sessionCookieHeader(cookieName(env), result.session_token, minutes * 60),
+      sessionCookieHeader(cookieName(env), sessionToken, minutes * 60),
     );
   }
   return new Response(
@@ -375,9 +376,6 @@ export default {
       // Slice 1 — Account API
       if (method === "POST" && path === "/v1/accounts") {
         return await handleAccountCreate(request, env);
-      }
-      if (method === "POST" && path === "/v1/_ops/slice1-prove") {
-        return await handleSlice1Prove(request, env);
       }
       const acc = ACCOUNT_PATH.exec(path);
       if (acc) {
