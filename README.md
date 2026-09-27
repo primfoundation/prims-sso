@@ -134,7 +134,7 @@ Schema: `migrations/0001_accounts.sql` (`account_id`, `email`, `stytch_user_id`,
 
 ## Agent API (Slice 2)
 
-Sub-identities under a Prims account, plus short-lived opaque tokens. `GET /health` reports `"slice": 2` (and still reports `d1_bound` / `stytch_configured`).
+Sub-identities under a Prims account, plus short-lived opaque tokens. `GET /health` reports `d1_bound` and `stytch_configured`. The current slice number is in the Policy section below.
 
 | Item | Value |
 |------|--------|
@@ -180,11 +180,56 @@ Issue response fields: `token` (once), `token_id`, `agent_id`, `account_id`, `ex
 npm test
 ```
 
-`npm test` runs the Slice 1 account schema check and the Slice 2 token suite (in-memory SQLite, no Wrangler): issue → introspect active → revoke → introspect inactive, plus a sibling agent token that stays valid after the other revoke (A2.5).
+`npm test` runs, with no Wrangler and no secrets:
 
-Apply the new migration on the existing D1 database (`prims-sso-accounts`) before deploying the Worker:
+- Slice 1 account schema check
+- Slice 2 token suite: issue → introspect active → revoke → introspect inactive, plus a sibling agent token that stays valid (A2.5)
+- Slice 3 policy suite (`tests/policy.test.ts`, A3.1–A3.4): grant read → allow; write with no grant → deny; other agent with no rows → deny; matching deny overrides allow
+
+Apply checked-in migrations (including `migrations/0003_rbac.sql`) on the existing D1 database (`prims-sso-accounts`) before deploying the Worker:
 
 ```bash
 npx wrangler d1 migrations apply prims-sso-accounts --remote
 ```
+
+## Policy / RBAC stub (Slice 3)
+
+Minimal per-agent allow/deny rows. **This is a stub, not OpenFGA.** Issue [#6 §6](https://github.com/primfoundation/prims-sso/issues/6) keeps authorization in an OpenFGA / Authzed-class store, separate from SSO authn. `POST /v1/policy/check` is the seam: replace `PolicyStore` later without changing that HTTP shape. `GET /health` reports `"slice": 3`.
+
+| Item | Value |
+|------|--------|
+| Schema | `migrations/0003_rbac.sql` — `agent_policies` (`agent_id`, `resource`, `action`, `effect`, `created_at`, `updated_at`) |
+| Actions | `read` or `write` only |
+| Effects | `allow` or `deny` |
+| Primary key | `(agent_id, resource, action, effect)` — both effects may exist for one tuple |
+| Match | Exact `resource` string. No wildcards, inheritance, or usersets |
+| Grant auth | Passkey session (cookie `prims_session` or `Authorization: Bearer <stytch_session_token>`). Caller must own the agent's account |
+| Check auth | None on this stub. Callers are trusted until the OpenFGA replacement. A missing agent is deny, not 404 |
+
+**Precedence** for `POST /v1/policy/check`:
+
+1. A row with the same `agent_id`, `resource`, and `action` and `effect=deny` → `{ "allow": false }`.
+2. Otherwise a matching `effect=allow` → `{ "allow": true }`.
+3. Otherwise **default deny** → `{ "allow": false }`.
+
+```bash
+# Grant read on resource:demo. effect defaults to allow when omitted.
+curl -sS -X POST "https://login.prims.sh/v1/agents/$AGENT_ID/policy" \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d '{"resource":"resource:demo","action":"read","effect":"allow"}'
+
+# Optional explicit deny (overrides an allow on the same agent, resource, and action)
+curl -sS -X POST "https://login.prims.sh/v1/agents/$AGENT_ID/policy" \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d '{"resource":"resource:demo","action":"read","effect":"deny"}'
+
+# Check — 200 {"allow":true} or {"allow":false}. No session.
+curl -sS -X POST https://login.prims.sh/v1/policy/check \
+  -H 'content-type: application/json' \
+  -d "{\"agent_id\":\"$AGENT_ID\",\"resource\":\"resource:demo\",\"action\":\"read\"}"
+```
+
+Grant response is the row (`agent_id`, `resource`, `action`, `effect`, timestamps), HTTP 201. Unauthenticated grant is 401. Another account's agent is 403.
 

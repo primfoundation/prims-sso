@@ -256,7 +256,7 @@ test("HTTP introspect fails immediately after revoke; sibling stays active", asy
   assert.equal(siblingBody.agent_id, agentB.agent_id);
 });
 
-test("health reports slice 2 and agent routes gate on session", async () => {
+test("health reports the current slice and agent routes gate on session", async () => {
   const { d1 } = openDb();
   const env = workerEnv(d1);
   const ctx = {} as ExecutionContext;
@@ -268,7 +268,7 @@ test("health reports slice 2 and agent routes gate on session", async () => {
     stytch_configured: boolean;
     rp_id: string;
   };
-  assert.equal(body.slice, 2);
+  assert.equal(body.slice, 3);
   assert.equal(body.d1_bound, true);
   assert.equal(body.stytch_configured, false);
   assert.equal(body.rp_id, "prims.sh");
