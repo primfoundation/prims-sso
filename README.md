@@ -67,6 +67,74 @@ npx wrangler deploy
 | POST | `/api/passkey/login/finish` | Stytch WebAuthn authenticate + session cookie |
 | POST | `/api/logout` | Revoke Stytch session + clear cookie |
 
+## Slice 1 — Prims account model (D1)
+
+**Primary store: Cloudflare D1** (`DB` binding, database `prims-sso-accounts`).
+
+**Why D1 (not Durable Object):** Slice 1 needs a relational row per human (`account_id`, email, role, timestamps) plus a checked-in SQL migration (A1.4). D1 gives simple CRUD and unique indexes on email / `stytch_user_id`. Durable Objects are reserved for later coordination-heavy state (agent fan-out, etc.).
+
+Schema: [`migrations/0001_accounts.sql`](./migrations/0001_accounts.sql).
+
+Passkey register/login finish also **upserts** a Prims account on first success (same default `role=member`).
+
+### Auth for Account API
+
+Mutating and read account routes require a **Slice 0 Stytch session**:
+
+| Mechanism | How |
+|-----------|-----|
+| Cookie | `Cookie: prims_session=<stytch_session_token>` (set by passkey login/register) |
+| Header | `Authorization: Bearer <stytch_session_token>` |
+
+Unauthenticated requests receive **401**. Callers may only read/patch **their own** `account_id` (403 otherwise). `linked_apple` is an optional stub string and is **not** primary auth.
+
+### Account API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/v1/accounts` | Create or upsert-on-first-login for the session user → `account_id`, `role=member` |
+| GET | `/v1/accounts/:account_id` | Return email + role (+ linked_apple, timestamps) |
+| PATCH | `/v1/accounts/:account_id` | Set `linked_apple` to a string or `null` |
+
+#### curl examples
+
+```bash
+# After passkey sign-in, session cookie is set. Or use Bearer:
+export SESSION='<stytch_session_token>'   # never commit
+export BASE='https://login.prims.sh'
+
+# A1.1 — upsert / create
+curl -sS -X POST "$BASE/v1/accounts" \
+  -H "Authorization: Bearer $SESSION" \
+  -H 'content-type: application/json' \
+  -d '{}'
+# → {"account_id":"acc_…","email":"…","linked_apple":null,"role":"member",...,"created":true}
+
+# A1.2 — authenticated GET
+curl -sS "$BASE/v1/accounts/$ACCOUNT_ID" \
+  -H "Authorization: Bearer $SESSION"
+# Unauthenticated → 401
+curl -sS -o /dev/null -w '%{http_code}\n' "$BASE/v1/accounts/$ACCOUNT_ID"
+
+# A1.3 — linked_apple stub
+curl -sS -X PATCH "$BASE/v1/accounts/$ACCOUNT_ID" \
+  -H "Authorization: Bearer $SESSION" \
+  -H 'content-type: application/json' \
+  -d '{"linked_apple":"apple_stub_sub"}'
+curl -sS -X PATCH "$BASE/v1/accounts/$ACCOUNT_ID" \
+  -H "Authorization: Bearer $SESSION" \
+  -H 'content-type: application/json' \
+  -d '{"linked_apple":null}'
+```
+
+### D1 migrate / deploy
+
+```bash
+npx wrangler d1 create prims-sso-accounts   # once; paste database_id into wrangler.toml
+npx wrangler d1 migrations apply prims-sso-accounts --remote
+npx wrangler deploy
+```
+
 ## What this is
 
 | Concern | Owner |

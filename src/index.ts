@@ -1,8 +1,14 @@
 /**
- * prims-sso Slice 0 — thin Workers façade over Stytch passkeys.
+ * prims-sso — Stytch passkey façade (Slice 0) + Prims accounts on D1 (Slice 1).
  * RP ID locked to prims.sh (#6). No WebAuthn crypto here.
  */
 
+import {
+  handleAccountCreate,
+  handleAccountGet,
+  handleAccountPatch,
+} from "./accounts_api";
+import { AccountStore } from "./accounts";
 import { renderPage } from "./html";
 import {
   clearSessionCookieHeader,
@@ -10,10 +16,12 @@ import {
   parseCookies,
   sessionCookieHeader,
 } from "./session";
+import { handleSlice1Prove } from "./slice1_prove";
 import { StytchApiError, stytchFromEnv, type StytchClient } from "./stytch";
 
 export interface Env {
   ASSETS: Fetcher;
+  DB: D1Database;
   RP_ID: string;
   SESSION_COOKIE: string;
   SESSION_DURATION_MINUTES: string;
@@ -69,26 +77,46 @@ async function resolveUserIdByEmail(
 ): Promise<string | null> {
   try {
     const found = await stytch.searchUsersByEmail(email);
-    const hit = found.results?.[0];
-    return hit?.user_id ?? null;
+    return found.results?.[0]?.user_id ?? null;
   } catch (err) {
     if (err instanceof StytchApiError && err.status === 404) return null;
-    // search may 400 on empty — treat as miss only for known not-found shapes
-    if (err instanceof StytchApiError && err.body.error_type === "user_not_found") {
+    if (
+      err instanceof StytchApiError &&
+      err.body.error_type === "user_not_found"
+    ) {
       return null;
     }
     throw err;
   }
 }
 
-async function ensureUser(
-  stytch: StytchClient,
-  email: string,
-): Promise<string> {
+async function ensureUser(stytch: StytchClient, email: string): Promise<string> {
   const existing = await resolveUserIdByEmail(stytch, email);
   if (existing) return existing;
-  const created = await stytch.createUser(email);
-  return created.user_id;
+  return (await stytch.createUser(email)).user_id;
+}
+
+/** Best-effort Prims account upsert after passkey session mint. */
+async function upsertAccountForUser(
+  env: Env,
+  stytch: StytchClient,
+  user_id: string,
+): Promise<void> {
+  if (!env.DB) return;
+  try {
+    const user = await stytch.usersGet(user_id);
+    const email =
+      user.emails?.find((e) => e.primary)?.email ||
+      user.emails?.[0]?.email ||
+      "";
+    if (!email) return;
+    await new AccountStore(env.DB).upsertOnLogin({
+      stytch_user_id: user_id,
+      email,
+    });
+  } catch {
+    // Account upsert must not break passkey login.
+  }
 }
 
 function mapStytchError(err: unknown): Response {
@@ -107,7 +135,10 @@ function mapStytchError(err: unknown): Response {
   return json({ error: message }, status);
 }
 
-async function handleRegisterStart(request: Request, env: Env): Promise<Response> {
+async function handleRegisterStart(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   const body = await readJson<{ email?: string }>(request);
   const email = body.email?.trim().toLowerCase();
   if (!email || !email.includes("@")) {
@@ -144,7 +175,10 @@ async function handleRegisterFinish(
     public_key_credential: body.public_key_credential,
     session_duration_minutes: minutes,
   });
-  const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
+  await upsertAccountForUser(env, stytch, result.user_id);
+  const headers = new Headers({
+    "Content-Type": "application/json; charset=utf-8",
+  });
   if (result.session_token) {
     headers.append(
       "Set-Cookie",
@@ -169,7 +203,10 @@ async function handleLoginStart(request: Request, env: Env): Promise<Response> {
   if (email) {
     const found = await resolveUserIdByEmail(stytch, email);
     if (!found) {
-      return json({ error: "No account for that email. Register a passkey first." }, 404);
+      return json(
+        { error: "No account for that email. Register a passkey first." },
+        404,
+      );
     }
     user_id = found;
   }
@@ -184,7 +221,10 @@ async function handleLoginStart(request: Request, env: Env): Promise<Response> {
   });
 }
 
-async function handleLoginFinish(request: Request, env: Env): Promise<Response> {
+async function handleLoginFinish(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   const body = await readJson<{ public_key_credential?: string }>(request);
   if (!body.public_key_credential) {
     return json({ error: "public_key_credential required" }, 400);
@@ -195,7 +235,10 @@ async function handleLoginFinish(request: Request, env: Env): Promise<Response> 
     public_key_credential: body.public_key_credential,
     session_duration_minutes: minutes,
   });
-  const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
+  await upsertAccountForUser(env, stytch, result.user_id);
+  const headers = new Headers({
+    "Content-Type": "application/json; charset=utf-8",
+  });
   if (result.session_token) {
     headers.append(
       "Set-Cookie",
@@ -207,13 +250,15 @@ async function handleLoginFinish(request: Request, env: Env): Promise<Response> 
       ok: true,
       user_id: result.user_id,
       has_session: Boolean(result.session_token),
-      // Opaque presence only — never echo session_token / jwt to JSON body.
     }),
     { status: 200, headers },
   );
 }
 
-async function handleSessionPage(request: Request, env: Env): Promise<Response> {
+async function handleSessionPage(
+  request: Request,
+  env: Env,
+): Promise<Response> {
   const cookies = parseCookies(request.headers.get("Cookie"));
   const token = cookies[cookieName(env)];
   if (!token) {
@@ -242,8 +287,7 @@ async function handleLogout(request: Request, env: Env): Promise<Response> {
   const token = cookies[cookieName(env)];
   if (token) {
     try {
-      const stytch = getClient(env);
-      await stytch.sessionsRevoke(token);
+      await getClient(env).sessionsRevoke(token);
     } catch {
       // Best-effort revoke; always clear local cookie.
     }
@@ -269,11 +313,11 @@ async function handleHealth(env: Env): Promise<Response> {
   return json({
     ok: true,
     service: "prims-sso",
-    slice: 0,
+    slice: 1,
     rp_id: rpId(env),
     stytch_configured: configured,
     stytch_env,
-    // Names only — never values. Matches Workers secrets on Eidos Worker prims-sso.
+    d1_bound: Boolean(env.DB),
     secrets_expected: [
       "STYTCH_PROJECT_ID",
       "STYTCH_SECRET",
@@ -285,8 +329,14 @@ async function handleHealth(env: Env): Promise<Response> {
   });
 }
 
+const ACCOUNT_PATH = /^\/v1\/accounts\/([^/]+)$/;
+
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(
+    request: Request,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method.toUpperCase();
@@ -299,11 +349,9 @@ export default {
       if (method === "GET" && (path === "/" || path === "/login")) {
         return html(renderPage({ mode: "login", rpId: rpId(env) }));
       }
-
       if (method === "GET" && path === "/register") {
         return html(renderPage({ mode: "register", rpId: rpId(env) }));
       }
-
       if (method === "GET" && path === "/session") {
         return handleSessionPage(request, env);
       }
@@ -320,19 +368,32 @@ export default {
       if (method === "POST" && path === "/api/passkey/login/finish") {
         return await handleLoginFinish(request, env);
       }
-      if (
-        (method === "POST" || method === "GET") &&
-        path === "/api/logout"
-      ) {
+      if ((method === "POST" || method === "GET") && path === "/api/logout") {
         return handleLogout(request, env);
       }
 
-      // Static brand assets via Workers assets binding
+      // Slice 1 — Account API
+      if (method === "POST" && path === "/v1/accounts") {
+        return await handleAccountCreate(request, env);
+      }
+      if (method === "POST" && path === "/v1/_ops/slice1-prove") {
+        return await handleSlice1Prove(request, env);
+      }
+      const acc = ACCOUNT_PATH.exec(path);
+      if (acc) {
+        const account_id = decodeURIComponent(acc[1]);
+        if (method === "GET") {
+          return await handleAccountGet(request, env, account_id);
+        }
+        if (method === "PATCH") {
+          return await handleAccountPatch(request, env, account_id);
+        }
+      }
+
       if (env.ASSETS) {
         const asset = await env.ASSETS.fetch(request);
         if (asset.status !== 404) return asset;
       }
-
       return json({ error: "not found" }, 404);
     } catch (err) {
       return mapStytchError(err);

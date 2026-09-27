@@ -19,3 +19,12 @@ run_worker_first = true
 RP_ID = "prims.sh"
 SESSION_COOKIE = "prims_session"
 SESSION_DURATION_MINUTES = "60"
+
+# Primary account store = D1 (Slice 1). Why: checked-in SQL migrations + simple
+# CRUD by account_id/email. DO reserved for later coordination-heavy state.
+# database_id filled by `wrangler d1 create prims-sso-accounts` (replace LOCAL placeholder for remote).
+[[d1_databases]]
+binding = "DB"
+database_name = "prims-sso-accounts"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "migrations"

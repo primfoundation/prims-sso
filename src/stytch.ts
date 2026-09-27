@@ -166,6 +166,49 @@ export class StytchClient {
       session_token,
     });
   }
+
+  usersGet(user_id: string) {
+    return this.requestGet<{
+      user_id: string;
+      emails?: Array<{ email: string; primary?: boolean }>;
+    }>(`/v1/users/${encodeURIComponent(user_id)}`);
+  }
+
+  /** Test-env helper: OTP login_or_create (code returned in test responses). */
+  otpsEmailLoginOrCreate(email: string) {
+    return this.request<{
+      email_id: string;
+      method_id?: string;
+      status_code: number;
+    }>("/v1/otps/email/login_or_create", { email });
+  }
+
+  otpsAuthenticate(params: {
+    method_id: string;
+    code: string;
+    session_duration_minutes: number;
+  }) {
+    return this.request<{
+      user_id: string;
+      session_token?: string;
+      session_jwt?: string;
+    }>("/v1/otps/authenticate", params);
+  }
+
+  private async requestGet<T>(path: string): Promise<T> {
+    const res = await fetch(`${baseUrl(this.envName)}${path}`, {
+      method: "GET",
+      headers: {
+        Authorization: this.authHeader(),
+        "Content-Type": "application/json",
+      },
+    });
+    const json = (await res.json()) as StytchErrorBody & T;
+    if (!res.ok) {
+      throw new StytchApiError(res.status, json);
+    }
+    return json;
+  }
 }
 
 export function stytchFromEnv(env: {
