@@ -273,7 +273,15 @@ async function handleHealth(env: Env): Promise<Response> {
     rp_id: rpId(env),
     stytch_configured: configured,
     stytch_env,
-    secrets_expected: ["STYTCH_PROJECT_ID", "STYTCH_SECRET"],
+    // Names only — never values. Matches Workers secrets on Eidos Worker prims-sso.
+    secrets_expected: [
+      "STYTCH_PROJECT_ID",
+      "STYTCH_SECRET",
+      "STYTCH_PUBLIC_TOKEN",
+      "STYTCH_API_HOST",
+      "STYTCH_PROJECT_DOMAIN",
+      "STYTCH_ENV_SLUG",
+    ],
   });
 }
 

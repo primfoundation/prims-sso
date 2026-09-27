@@ -1,7 +1,13 @@
 # Local Wrangler secrets (gitignored). Copy to .dev.vars and fill values.
-# Never commit real values. Production: `wrangler secret put STYTCH_PROJECT_ID` etc.
+# Never commit real values. Production: `wrangler secret put …`
 
-STYTCH_PROJECT_ID=project-test-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-STYTCH_SECRET=secret-test-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# Placeholders only — replace locally; never commit real values.
+STYTCH_PROJECT_ID=REPLACE_ME
+STYTCH_SECRET=REPLACE_ME
 # Optional override; otherwise inferred from project-test- / project-live- prefix
 # STYTCH_ENV=test
+# Also used in production (Workers secrets; not required for local façade):
+# STYTCH_PUBLIC_TOKEN=REPLACE_ME
+# STYTCH_API_HOST=https://test.stytch.com
+# STYTCH_PROJECT_DOMAIN=REPLACE_ME
+# STYTCH_ENV_SLUG=test-usaz

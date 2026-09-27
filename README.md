@@ -26,8 +26,9 @@ Workers façade for Stytch-backed passkey **registration** and **sign-in**.
 |------|--------|
 | RP ID | `prims.sh` (locked) |
 | Login origin | `https://login.prims.sh` |
-| Secrets (Workers only) | `STYTCH_PROJECT_ID`, `STYTCH_SECRET` (optional `STYTCH_ENV=test\|live`) |
-| Non-secret vars | `RP_ID`, `SESSION_COOKIE`, `SESSION_DURATION_MINUTES` |
+| Secrets (Workers only) | `STYTCH_PROJECT_ID`, `STYTCH_SECRET`, `STYTCH_PUBLIC_TOKEN`, `STYTCH_API_HOST`, `STYTCH_PROJECT_DOMAIN`, `STYTCH_ENV_SLUG` |
+| Non-secret vars | `RP_ID=prims.sh`, `SESSION_COOKIE`, `SESSION_DURATION_MINUTES` |
+| Cloudflare | Eidos AGI account · Worker `prims-sso` · custom domain `login.prims.sh` |
 
 ### Local development
 
