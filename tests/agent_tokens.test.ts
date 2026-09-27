@@ -268,7 +268,7 @@ test("health reports the current slice and agent routes gate on session", async 
     stytch_configured: boolean;
     rp_id: string;
   };
-  assert.equal(body.slice, 3);
+  assert.equal(body.slice, 4);
   assert.equal(body.d1_bound, true);
   assert.equal(body.stytch_configured, false);
   assert.equal(body.rp_id, "prims.sh");

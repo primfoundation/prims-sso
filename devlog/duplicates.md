@@ -4,6 +4,12 @@
 - **Why:** Slice 2 should not refactor Slice 0/1 modules to share a helper. The three copies are each a few lines and keep the account handlers untouched.
 - **Supporting Research:** None.
 
+## 2026-09-27 Vault route helpers
+
+- **What changed:** `vault_api.ts` copies the small `json()`, `readBody()`, and `requireOwner()` helpers from `policy_api.ts`. `tests/vault.test.ts` copies the in-memory D1 `openDb` shape and adds `all()` for ref lists.
+- **Why:** Slice 4 must not refactor Slice 2/3 modules or their test harnesses to share those helpers. Each copy is short and leaves token and policy behavior untouched.
+- **Supporting Research:** None.
+
 ## 2026-09-27 Policy route helpers
 
 - **What changed:** `policy_api.ts` copies the small `json()`, `readBody()`, and `requireOwner()` helpers from `agents_api.ts`.
