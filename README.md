@@ -134,7 +134,7 @@ Schema: `migrations/0001_accounts.sql` (`account_id`, `email`, `stytch_user_id`,
 
 ## Agent API (Slice 2)
 
-Sub-identities under a Prims account, plus short-lived opaque tokens. `GET /health` reports `d1_bound` and `stytch_configured`. The current slice number is in the Policy section below.
+Sub-identities under a Prims account, plus short-lived opaque tokens. `GET /health` reports `d1_bound` and `stytch_configured`. The current slice number is in the Connector vault section below.
 
 | Item | Value |
 |------|--------|
@@ -185,8 +185,9 @@ npm test
 - Slice 1 account schema check
 - Slice 2 token suite: issue → introspect active → revoke → introspect inactive, plus a sibling agent token that stays valid (A2.5)
 - Slice 3 policy suite (`tests/policy.test.ts`, A3.1–A3.4): grant read → allow; write with no grant → deny; other agent with no rows → deny; matching deny overrides allow
+- Slice 4 vault suite (`tests/vault.test.ts`, A4.1–A4.4): store fake token → ref; agent metadata omits the raw token; authorized retrieve returns it; revoke agent makes the old ref fail
 
-Apply checked-in migrations (including `migrations/0003_rbac.sql`) on the existing D1 database (`prims-sso-accounts`) before deploying the Worker:
+Apply checked-in migrations (including `migrations/0004_vault.sql`) on the existing D1 database (`prims-sso-accounts`) before deploying the Worker:
 
 ```bash
 npx wrangler d1 migrations apply prims-sso-accounts --remote
@@ -194,7 +195,7 @@ npx wrangler d1 migrations apply prims-sso-accounts --remote
 
 ## Policy / RBAC stub (Slice 3)
 
-Minimal per-agent allow/deny rows. **This is a stub, not OpenFGA.** Issue [#6 §6](https://github.com/primfoundation/prims-sso/issues/6) keeps authorization in an OpenFGA / Authzed-class store, separate from SSO authn. `POST /v1/policy/check` is the seam: replace `PolicyStore` later without changing that HTTP shape. `GET /health` reports `"slice": 3`.
+Minimal per-agent allow/deny rows. **This is a stub, not OpenFGA.** Issue [#6 §6](https://github.com/primfoundation/prims-sso/issues/6) keeps authorization in an OpenFGA / Authzed-class store, separate from SSO authn. `POST /v1/policy/check` is the seam: replace `PolicyStore` later without changing that HTTP shape. `GET /health` reports the current slice in the Connector vault section (`"slice": 4`).
 
 | Item | Value |
 |------|--------|
@@ -232,4 +233,50 @@ curl -sS -X POST https://login.prims.sh/v1/policy/check \
 ```
 
 Grant response is the row (`agent_id`, `resource`, `action`, `effect`, timestamps), HTTP 201. Unauthenticated grant is 401. Another account's agent is 403.
+
+## Connector vault stub (Slice 4)
+
+Stub only: a caller-supplied **fake** connector token. No real OAuth providers (no Gmail, Drive, or any other provider token exchange). `GET /health` reports `"slice": 4`.
+
+The raw token is stored in D1 table `connector_vault`, keyed by `agent_id` + `connector_id`. Account responses and `GET /v1/agents/:agent_id` return an opaque `ref` only. The fake token comes back from `POST /v1/vault/retrieve`, and only for the passkey session that owns the agent.
+
+| Item | Value |
+|------|--------|
+| Schema | `migrations/0004_vault.sql` — `connector_vault` (`ref`, `agent_id`, `connector_id`, `token`, timestamps), unique `(agent_id, connector_id)` |
+| Store | `POST /v1/agents/:agent_id/vault` with `{ "connector_id", "token" }` → `{ ref, agent_id, connector_id }` (HTTP 201). The body does not include `token` |
+| Metadata | `GET /v1/agents/:agent_id` → agent fields plus `connectors: [{ ref, connector_id }]`. No raw token |
+| Retrieve | `POST /v1/vault/retrieve` with `{ "ref" }` → `{ ref, agent_id, connector_id, token }` |
+| Auth | Same passkey session as the Account API: cookie `prims_session` or `Authorization: Bearer <stytch_session_token>`. Caller must own the agent's account. No session → 401. Another account's ref → 404 |
+| Replace | Storing the same `connector_id` again updates the fake token and keeps the same `ref` |
+| Revoke agent | `POST /v1/agents/:agent_id/revoke` denylists that agent's live tokens and **deletes** its vault rows. Retrieve by the old `ref` then fails. A sibling agent's vault ref and token stay valid |
+
+```bash
+# Store a fake token — response includes ref and does not include the token
+curl -sS -X POST "https://login.prims.sh/v1/agents/$AGENT_ID/vault" \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d '{"connector_id":"fake:demo","token":"fake-connector-token"}'
+
+# Agent metadata — connectors list refs only
+curl -sS "https://login.prims.sh/v1/agents/$AGENT_ID" \
+  -H "cookie: prims_session=$PRIM_SESSION"
+
+# Authorized retrieve — returns the fake token
+curl -sS -X POST https://login.prims.sh/v1/vault/retrieve \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d "{\"ref\":\"$VAULT_REF\"}"
+
+# Revoke the agent — vault rows for that agent_id are deleted
+curl -sS -X POST "https://login.prims.sh/v1/agents/$AGENT_ID/revoke" \
+  -H "cookie: prims_session=$PRIM_SESSION"
+
+# Old ref — 404
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://login.prims.sh/v1/vault/retrieve \
+  -H 'content-type: application/json' \
+  -H "cookie: prims_session=$PRIM_SESSION" \
+  -d "{\"ref\":\"$VAULT_REF\"}"
+```
+
+`connector_id` is a label (`fake:demo`), 1–128 characters (`A-Za-z0-9._:-`). `token` is an opaque fake string, 1–4096 characters. Unauthenticated store, metadata, retrieve, and revoke are 401.
 

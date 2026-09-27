@@ -29,6 +29,10 @@ export interface ActiveIntrospection {
 
 export type Introspection = ActiveIntrospection | { active: false };
 
+export type RevokeAgentResult =
+  | { ok: true; agent_id: string }
+  | { ok: false; reason: "not_found" | "forbidden" };
+
 interface TokenRow {
   token_id: string;
   token_hash: string;
@@ -155,6 +159,38 @@ export class AgentStore {
       agent_id: row.agent_id,
       account_id: row.account_id,
     };
+  }
+
+  /**
+   * Denylist every live token for one agent owned by account_id.
+   * A second call still succeeds. The vault handler deletes connector rows.
+   */
+  async revokeAgent(input: {
+    account_id: string;
+    agent_id: string;
+    now?: Date;
+  }): Promise<RevokeAgentResult> {
+    const agent = await this.get(input.agent_id);
+    if (!agent) return { ok: false, reason: "not_found" };
+    if (agent.account_id !== input.account_id) {
+      return { ok: false, reason: "forbidden" };
+    }
+    const stamp = iso(input.now);
+    await this.db
+      .prepare(
+        `UPDATE agent_tokens
+         SET revoked_at = ?
+         WHERE agent_id = ? AND account_id = ? AND revoked_at IS NULL`,
+      )
+      .bind(stamp, input.agent_id, input.account_id)
+      .run();
+    await this.db
+      .prepare(
+        "UPDATE agents SET updated_at = ? WHERE agent_id = ? AND account_id = ?",
+      )
+      .bind(stamp, input.agent_id, input.account_id)
+      .run();
+    return { ok: true, agent_id: agent.agent_id };
   }
 
   private async insertToken(

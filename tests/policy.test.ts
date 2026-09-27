@@ -229,5 +229,5 @@ test("A3.4 HTTP check suite and unauthenticated grant is 401", async () => {
   );
   assert.equal(grant.status, 401);
   const health = await worker.fetch(new Request("https://login.prims.sh/health"), env, ctx);
-  assert.equal(((await health.json()) as { slice: number }).slice, 3);
+  assert.equal(((await health.json()) as { slice: number }).slice, 4);
 });
