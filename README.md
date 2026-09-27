@@ -28,12 +28,10 @@ Prefer Cloudflare Access + this IdP (or equivalent OIDC) for the HTML gate.
 
 ## Workstreams
 
-Tracked as GitHub Issues (cross-linked):
-
-1. Prims account model
-2. OIDC/OAuth provider endpoint for web login
-3. drive.prims.sh integration (Cloudflare Access + this IdP)
-4. Agent identity vs human identity separation
+1. [#1 Prims account model](https://github.com/primfoundation/prims-sso/issues/1)
+2. [#2 OIDC/OAuth provider endpoint](https://github.com/primfoundation/prims-sso/issues/2)
+3. [#3 drive.prims.sh integration (Cloudflare Access + IdP)](https://github.com/primfoundation/prims-sso/issues/3)
+4. [#4 Agent vs human identity separation](https://github.com/primfoundation/prims-sso/issues/4)
 
 ## Status
 
