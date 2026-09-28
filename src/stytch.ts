@@ -167,6 +167,25 @@ export class StytchClient {
     });
   }
 
+  /** Connected Apps owns client validation, consent grants and code issuance. */
+  oauthAuthorizeStart(params: OAuthStart) {
+    return this.request<{
+      user_id: string;
+      client: { client_id: string; client_name: string };
+      scope_results: Array<{ scope: string; description: string; is_grantable: boolean }>;
+    }>("/v1/idp/oauth/authorize/start", params);
+  }
+
+  oauthAuthorize(params: OAuthStart & {
+    consent_granted: boolean;
+    code_challenge: string;
+    resources: string[];
+    state?: string;
+    nonce?: string;
+  }) {
+    return this.request<{ redirect_uri: string }>("/v1/idp/oauth/authorize", params);
+  }
+
   usersGet(user_id: string) {
     return this.requestGet<{
       user_id: string;
@@ -209,6 +228,15 @@ export class StytchClient {
     }
     return json;
   }
+}
+
+export interface OAuthStart {
+  client_id: string;
+  redirect_uri: string;
+  response_type: string;
+  scopes: string[];
+  session_token: string;
+  prompt?: string;
 }
 
 export function stytchFromEnv(env: {

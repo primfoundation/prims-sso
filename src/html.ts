@@ -8,6 +8,7 @@ export function renderPage(opts: {
   email?: string;
   userId?: string;
   error?: string;
+  returnTo?: string;
 }): string {
   const { mode, rpId, email, userId, error } = opts;
   const title =
@@ -88,7 +89,7 @@ export function renderPage(opts: {
     <p class="meta">Passkeys via Stytch · RP ID <code>${escapeHtml(rpId)}</code> · façade on Workers</p>
   </div>
 </main>
-${mode === "signed-in" ? "" : clientScript()}
+${mode === "signed-in" ? "" : clientScript(opts.returnTo)}
 </html>`;
 }
 
@@ -129,12 +130,18 @@ function signedInBody(email?: string, userId?: string): string {
 </div>`;
 }
 
-function clientScript(): string {
+function clientScript(returnTo = '/session'): string {
   return `<script type="module">
 const form = document.getElementById("auth-form");
 const statusEl = document.getElementById("status");
 const btn = document.getElementById("primary-btn");
 const isRegister = location.pathname.startsWith("/register");
+const returnTo = ${JSON.stringify(returnTo).replace(/</g, '\\u003c')};
+if (returnTo !== '/session') {
+  for (const link of document.querySelectorAll('a[href="/"], a[href="/register"]')) {
+    link.href += '?return_to=' + encodeURIComponent(returnTo);
+  }
+}
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -256,7 +263,7 @@ form?.addEventListener("submit", async (ev) => {
         public_key_credential: serializeAttestation(cred),
       });
       setStatus("Passkey created. Signed in.");
-      location.href = "/session";
+      location.href = returnTo;
     } else {
       setStatus("Starting sign-in…");
       const start = await postJson("/api/passkey/login/start", email ? { email } : {});
@@ -269,7 +276,7 @@ form?.addEventListener("submit", async (ev) => {
         public_key_credential: serializeAssertion(cred),
       });
       setStatus("Signed in.");
-      location.href = "/session";
+      location.href = returnTo;
     }
   } catch (err) {
     console.error(err);
