@@ -15,6 +15,7 @@ import { dispatchPolicyRoutes } from "./policy_api";
 import { dispatchVaultRoutes } from "./vault_api";
 import { AccountStore } from "./accounts";
 import { renderPage } from "./html";
+import { introspectOAuth, type OAuthTokenEnv } from "./oauth_tokens";
 import { authorizePage, loginContinuation } from "./oauth";
 import {
   clearSessionCookieHeader,
@@ -24,7 +25,7 @@ import {
 } from "./session";
 import { StytchApiError, stytchFromEnv, type StytchClient } from "./stytch";
 
-export interface Env {
+export interface Env extends OAuthTokenEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   RP_ID: string;
@@ -353,6 +354,8 @@ export default {
       if (method === "GET" && path === "/health") {
         return handleHealth(env);
       }
+
+      if (method === "POST" && path === "/v1/oauth/introspect") return introspectOAuth(request, env);
 
       if (path === "/oauth/authorize") return authorizePage(request, env);
 

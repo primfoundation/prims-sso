@@ -67,3 +67,33 @@ https://github.com/stytchauth/stytch-node/blob/main/lib/b2c/idp_oauth.ts
 
 Official integration example (issuer discovery is project-dependent):
 https://github.com/stytchauth/mcp-examples/tree/main/consumer-integrated
+
+## OAuth token adapter (2026-09-28 candidate)
+
+`POST /v1/oauth/introspect` validates online with Stytch on every request, then
+looks up the provider subject in existing Prims accounts and the assigned agent
+in the existing agent store. It does not mint tokens or provision identities.
+
+Configuration, all absent until actual provider verification:
+- `CONNECTED_APPS_ENABLED=true`
+- `OAUTH_ISSUER`: exact verified discovery issuer
+- `OAUTH_INTROSPECTION_ENDPOINT`: verified HTTPS endpoint on the issuer origin
+- `OAUTH_CLIENT_ID`, optional secret `OAUTH_CLIENT_SECRET` for confidential clients
+- `OAUTH_AGENT_BINDINGS`: JSON array of `{stytch_user_id, client_id, agent_id}`
+  for existing account-owned agents; missing/ambiguous/cross-account mappings deny
+
+Accept only provider `active=true`, matching issuer/client, `access_token`, valid
+expiry/not-before, exact Drive audience and Drive scopes. Refresh/session/ID
+tokens and project-only audiences do not qualify. Provider failures return 503;
+inactive credentials return 401. Responses are no-store; no token caching.
+Drive still performs live profile-policy checks after this authentication.
+
+The live D1 inventory contains earlier test accounts only; no real Daniel account
+assignment is available. Do not attach production profiles to those fixtures.
+Live Stytch/ChatGPT consent, refresh, revocation, and installation remain gates.
+
+Research: official Stytch SDK `lib/b2c/idp.ts` network introspection and
+https://stytch.com/docs/api-reference/consumer/api/connected-apps/methods/introspect-token
+were checked. The requested research-first/check-governance skillflow tools are
+not exposed in this session; no successful run is claimed. No production
+activation or schema change is included in this candidate.
