@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { introspectOAuth, type OAuthTokenEnv } from '../src/oauth_tokens';
-const request=(token='provider.jwt.token')=>new Request('https://login.prims.sh/v1/oauth/introspect',{
+import { clientIdFromAccessToken, introspectOAuth, type OAuthTokenEnv } from '../src/oauth_tokens';
+function accessToken(clientId = 'client') {
+  const payload = Buffer.from(JSON.stringify({ client_id: clientId })).toString('base64url');
+  return `eyJhbGciOiJub25lIn0.${payload}.sig`;
+}
+const TOKEN = accessToken();
+const request=(token=TOKEN)=>new Request('https://login.prims.sh/v1/oauth/introspect',{
   method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token}),
 });
 function setup() {
@@ -21,7 +26,8 @@ function setup() {
     state.calls++;assert.equal(input,env.OAUTH_INTROSPECTION_ENDPOINT);
     assert.equal(init?.redirect,'manual');assert.ok(init?.signal);
     const body=init!.body as URLSearchParams;
-    assert.equal(body.get('token'),'provider.jwt.token');assert.equal(body.get('client_id'),'client');
+    assert.equal(body.get('token'),TOKEN);assert.equal(body.get('client_id'),'client');
+    assert.equal(body.get('client_secret'),null);
     assert.equal(body.get('token_type_hint'),'access_token');
     assert.equal(new Headers(init?.headers).get('authorization'),null);
     return Response.json(claims,{status:state.status});
@@ -63,4 +69,52 @@ test('disabled, invalid configuration, malformed credentials and provider outage
   assert.equal((await introspectOAuth(request('a'.repeat(21000)),env)).status,401);
   assert.equal((await introspectOAuth(request('bad token'),env)).status,401);assert.equal(state.calls,0);
   for(const status of [302,400,401,429,500]) {state.status=status;assert.equal((await introspectOAuth(request(),env)).status,503);}
+});
+test('project audience is accepted only when it also contains the Drive resource',async t=>{
+  const {claims,env,fetcher}=setup();t.mock.method(globalThis,'fetch',fetcher);
+  claims.aud=['project-test-id','https://drive.prims.sh'];
+  assert.equal((await introspectOAuth(request(),env)).status,200);
+  claims.aud=['project-test-id'];
+  assert.equal((await introspectOAuth(request(),env)).status,401);
+});
+test('a client outside the bindings never reaches the provider',async t=>{
+  const {env,fetcher,state}=setup();t.mock.method(globalThis,'fetch',fetcher);
+  assert.equal(clientIdFromAccessToken(accessToken('https://chatgpt.example/oauth/client.json')),'https://chatgpt.example/oauth/client.json');
+  assert.equal(clientIdFromAccessToken('not-a-jwt'),null);
+  assert.equal((await introspectOAuth(request(accessToken('https://evil.example/client.json')),env)).status,401);
+  assert.equal((await introspectOAuth(request(accessToken('other')),{...env,OAUTH_CLIENT_ID:undefined})).status,401);
+  assert.equal(state.calls,0);
+});
+test('ChatGPT and Grok map to their own agents and secrets stay on the presented client',async t=>{
+  const bindings=[
+    {stytch_user_id:'user',client_id:'https://chatgpt.example/oauth/client.json',agent_id:'chatgpt-agent'},
+    {stytch_user_id:'user',client_id:'https://grok.example/oauth/client.json',agent_id:'grok-agent'},
+  ];
+  const seen: Array<{client_id:string|null;client_secret:string|null}> = [];
+  const env: OAuthTokenEnv={
+    CONNECTED_APPS_ENABLED:'true',OAUTH_ISSUER:'https://issuer.example',
+    OAUTH_INTROSPECTION_ENDPOINT:'https://issuer.example/v1/oauth2/introspect',
+    OAUTH_CLIENT_SECRETS:JSON.stringify({'https://grok.example/oauth/client.json':'grok-secret'}),
+    OAUTH_AGENT_BINDINGS:JSON.stringify(bindings),
+    DB:{prepare:(sql:string)=>({bind:(id:string)=>({first:async()=>{
+      if(sql.includes('FROM accounts')) return {account_id:'account'};
+      return {agent_id:id,account_id:'account'};
+    }})})} as any,
+  };
+  t.mock.method(globalThis,'fetch',async (_input: unknown, init?: RequestInit)=>{
+    const body=init!.body as URLSearchParams;
+    seen.push({client_id:body.get('client_id'),client_secret:body.get('client_secret')});
+    return Response.json({active:true,iss:env.OAUTH_ISSUER,client_id:body.get('client_id'),
+      token_type:'access_token',sub:'user',exp:Math.floor(Date.now()/1000)+60,
+      aud:['project-test-id','https://drive.prims.sh'],scope:'primsdrive.read'});
+  });
+  const chatgpt=await introspectOAuth(request(accessToken(bindings[0].client_id)),env);
+  const grok=await introspectOAuth(request(accessToken(bindings[1].client_id)),env);
+  assert.equal((await chatgpt.json()).agent_id,'chatgpt-agent');
+  assert.equal((await grok.json()).agent_id,'grok-agent');
+  assert.deepEqual(seen,[
+    {client_id:bindings[0].client_id,client_secret:null},
+    {client_id:bindings[1].client_id,client_secret:'grok-secret'},
+  ]);
+  assert.equal((await introspectOAuth(request(),{...env,OAUTH_CLIENT_SECRETS:'[]'})).status,503);
 });

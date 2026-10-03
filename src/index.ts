@@ -15,6 +15,7 @@ import { dispatchPolicyRoutes } from "./policy_api";
 import { dispatchVaultRoutes } from "./vault_api";
 import { AccountStore } from "./accounts";
 import { renderPage } from "./html";
+import { configuredHttps, isIssuerDiscoveryPath, issuerDiscoveryRefusal } from "./oauth_discovery";
 import { introspectOAuth, type OAuthTokenEnv } from "./oauth_tokens";
 import { authorizePage, loginContinuation } from "./oauth";
 import {
@@ -327,6 +328,9 @@ async function handleHealth(env: Env): Promise<Response> {
     stytch_configured: configured,
     stytch_env,
     d1_bound: Boolean(env.DB),
+    connected_apps_enabled: env.CONNECTED_APPS_ENABLED === "true",
+    oauth_issuer_configured: configuredHttps(env.OAUTH_ISSUER),
+    oauth_introspection_configured: configuredHttps(env.OAUTH_INTROSPECTION_ENDPOINT),
     secrets_expected: [
       "STYTCH_PROJECT_ID",
       "STYTCH_SECRET",
@@ -354,6 +358,8 @@ export default {
       if (method === "GET" && path === "/health") {
         return handleHealth(env);
       }
+
+      if (method === "GET" && isIssuerDiscoveryPath(path)) return issuerDiscoveryRefusal();
 
       if (method === "POST" && path === "/v1/oauth/introspect") return introspectOAuth(request, env);
 

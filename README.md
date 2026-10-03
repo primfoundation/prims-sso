@@ -280,3 +280,17 @@ curl -sS -o /dev/null -w '%{http_code}\n' -X POST https://login.prims.sh/v1/vaul
 
 `connector_id` is a label (`fake:demo`), 1–128 characters (`A-Za-z0-9._:-`). `token` is an opaque fake string, 1–4096 characters. Unauthenticated store, metadata, retrieve, and revoke are 401.
 
+## Connected Apps consent (gated, not enabled)
+
+ChatGPT and Grok reach PrimsDrive through the **existing** Stytch Connected Apps
+project. This Worker renders consent at `GET /oauth/authorize` and maps provider
+access tokens at `POST /v1/oauth/introspect`. Stytch hosts issuer discovery,
+`/v1/oauth2/token` (code and refresh), `/v1/oauth2/revoke`, and client registration.
+`login.prims.sh` returns 503 for `/.well-known/oauth-authorization-server` and
+`/.well-known/openid-configuration` so it is not a second issuer.
+
+`CONNECTED_APPS_ENABLED` is unset. `/health` reports `connected_apps_enabled`,
+`oauth_issuer_configured`, and `oauth_introspection_configured` as false until
+the checklist in [docs/CONNECTED-APPS.md](./docs/CONNECTED-APPS.md) is done.
+Do not bind fixture accounts or assign Sandisk profiles from this service.
+

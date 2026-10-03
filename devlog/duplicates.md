@@ -1,3 +1,9 @@
+## 2026-10-03 OAuth HTTPS checks
+
+- **What changed:** `oauth_tokens.ts` throws from `https()` when issuer config is unsafe. `oauth_discovery.ts` `configuredHttps()` returns a boolean for `/health`.
+- **Why:** Health must not throw or import the token mapper. The two checks encode the same URL rules for different callers. Leaving both avoids a shared module that would couple the health probe to introspection.
+- **Supporting Research:** `devlog/research.md`.
+
 ## 2026-09-27 JSON response helper
 
 - **What changed:** `agents_api.ts` has its own small `json()` helper, same shape as `accounts_api.ts` and `src/index.ts`.
