@@ -15,6 +15,9 @@ import { dispatchPolicyRoutes } from "./policy_api";
 import { dispatchVaultRoutes } from "./vault_api";
 import { AccountStore } from "./accounts";
 import { renderPage } from "./html";
+import { configuredHttps, isIssuerDiscoveryPath, issuerDiscoveryRefusal } from "./oauth_discovery";
+import { introspectOAuth, type OAuthTokenEnv } from "./oauth_tokens";
+import { authorizePage, loginContinuation } from "./oauth";
 import {
   clearSessionCookieHeader,
   DEFAULT_SESSION_COOKIE,
@@ -23,7 +26,7 @@ import {
 } from "./session";
 import { StytchApiError, stytchFromEnv, type StytchClient } from "./stytch";
 
-export interface Env {
+export interface Env extends OAuthTokenEnv {
   ASSETS: Fetcher;
   DB: D1Database;
   RP_ID: string;
@@ -32,6 +35,7 @@ export interface Env {
   STYTCH_PROJECT_ID?: string;
   STYTCH_SECRET?: string;
   STYTCH_ENV?: string;
+  CONNECTED_APPS_ENABLED?: string;
 }
 
 function json(data: unknown, status = 200, headers?: HeadersInit): Response {
@@ -324,6 +328,9 @@ async function handleHealth(env: Env): Promise<Response> {
     stytch_configured: configured,
     stytch_env,
     d1_bound: Boolean(env.DB),
+    connected_apps_enabled: env.CONNECTED_APPS_ENABLED === "true",
+    oauth_issuer_configured: configuredHttps(env.OAUTH_ISSUER),
+    oauth_introspection_configured: configuredHttps(env.OAUTH_INTROSPECTION_ENDPOINT),
     secrets_expected: [
       "STYTCH_PROJECT_ID",
       "STYTCH_SECRET",
@@ -352,11 +359,17 @@ export default {
         return handleHealth(env);
       }
 
+      if (method === "GET" && isIssuerDiscoveryPath(path)) return issuerDiscoveryRefusal();
+
+      if (method === "POST" && path === "/v1/oauth/introspect") return introspectOAuth(request, env);
+
+      if (path === "/oauth/authorize") return authorizePage(request, env);
+
       if (method === "GET" && (path === "/" || path === "/login")) {
-        return html(renderPage({ mode: "login", rpId: rpId(env) }));
+        return html(renderPage({ mode: "login", rpId: rpId(env), returnTo: loginContinuation(url.searchParams.get('return_to')) }),200,{'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
       }
       if (method === "GET" && path === "/register") {
-        return html(renderPage({ mode: "register", rpId: rpId(env) }));
+        return html(renderPage({ mode: "register", rpId: rpId(env), returnTo: loginContinuation(url.searchParams.get('return_to')) }),200,{'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
       }
       if (method === "GET" && path === "/session") {
         return handleSessionPage(request, env);

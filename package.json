@@ -9,7 +9,7 @@
     "deploy": "wrangler deploy",
     "deploy:preview": "wrangler deploy --temporary",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/accounts_store.test.mjs && node --experimental-transform-types --import ./tests/register-ts.mjs --test tests/agent_tokens.test.ts tests/policy.test.ts tests/vault.test.ts"
+    "test": "node tests/accounts_store.test.mjs && node --experimental-transform-types --import ./tests/register-ts.mjs --test tests/agent_tokens.test.ts tests/policy.test.ts tests/vault.test.ts tests/oauth.test.ts tests/oauth_tokens.test.ts tests/oauth_discovery.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260925.1",
